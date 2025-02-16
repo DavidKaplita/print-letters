@@ -4,8 +4,12 @@ from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 from google.oauth2 import service_account
 from googleapiclient.errors import HttpError
+
 from reportlab.lib.pagesizes import A6
-from reportlab.lib.units import inch
+from reportlab.lib.units import inch, mm
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Frame, PageBreak
+from reportlab.lib.styles import ParagraphStyle
+from reportlab.lib.enums import TA_CENTER, TA_LEFT
 
 SERVICE_ACCOUNT_FILE = 'credentials.json'
 
@@ -88,114 +92,63 @@ def get_spreadsheet_data():
         return []
 
 
-def create_google_doc(data):
-    """Creates a new Google Doc with A6 page format, adds data, and centers it."""
+def create_pdf(recipients, pdf_filename="letters.pdf"):
+    """
+    Creates a PDF with A6 pages, each containing name, address, and city_state_zip
+    from the 'data' array, centered on the page.  Includes a return address in the
+    upper left if provided.
 
-    try:
-        service = build('docs', 'v1', credentials=creds)
+    Args:
+        data: A list of dictionaries, where each dictionary contains
+              'name', 'address', and 'city_state_zip' keys.
+        output_filename: The name of the PDF file to be created.
+        return_address: A string containing the return address, or None.
+    """
+    A6_Landscape_Oversize = (188*mm, 105*mm)
+    A6_Landscape = (148*mm, 105*mm)
+    doc = SimpleDocTemplate(
+        pdf_filename, pagesize=A6_Landscape_Oversize, showBoundary=0)
+    centered_style = ParagraphStyle(name="CenterNormal",
+                                    fontSize=17, # Font Size
+                                    leading=12, # Line height
+                                    leftIndent=25,
+                                    alignment=TA_LEFT)
 
-        # Create a new Google Doc
-        document = {'title': 'Save The Date Print'}
-        document = service.documents().create(body=document).execute()
-        new_document_id = document.get('documentId')
-        print(f"New Google Doc created with ID: {new_document_id}")
+    top_spacer = Spacer(1, 0.5 * inch)
+    spacer = Spacer(1, 0.05 * inch)
 
-        # Add data to the document with formatting and page breaks
-        requests = []
-        current_index = 1  # Initialize the index
+    story = []
 
-        for item in data:
-            requests.append({
-                'insertTable': {
-                    'rows': 1,
-                    'columns': 3,
-                    'location': {'index': current_index}
-                }
-            })
-            current_index += 1
+    for i, item in enumerate(recipients):
+        if i > 0:  # Add page break *before* all but the first item
+            story.append(PageBreak())
 
-            # Insert text into the table cells
-            requests.append({
-                'insertText': {
-                    'location': {
-                        'index': current_index
-                    },
-                    'text': item['name']
-                }
-            })
-            current_index += 1
+        name = item.get("name", "")
+        address = item.get("address", "")
+        city_state_zip = item.get("city_state_zip", "")
 
-            requests.append({
-                'insertText': {
-                    'location': {
-                        'index': current_index
-                    },
-                    'text': item['address']
-                }
-            })
-            current_index += 1
+        name_paragraph = Paragraph(name, centered_style)
+        address_paragraph = Paragraph(address, centered_style)
+        city_state_zip_paragraph = Paragraph(city_state_zip, centered_style)
 
-            requests.append({
-                'insertText': {
-                    'location': {
-                        'index': current_index
-                    },
-                    'text': item['city_state_zip']
-                }
-            })
-            current_index += 1
+        story.append(top_spacer)
+        story.append(name_paragraph)
+        story.append(spacer)
+        story.append(address_paragraph)
+        story.append(spacer)
+        story.append(city_state_zip_paragraph)
 
-            """
-            # Center the text in all cells of the table
-            requests.append({
-                'updateTableCellStyle': {
-                    'tableCellStyle': {
-                        'contentAlignment': 'CONTENT_ALIGNMENT_LEFT'
-                    },
-                    'fields': 'contentAlignment',
-                    'tableRange': {
-                        'startIndex': current_index-4,
-                        'endIndex': current_index-1
-                    }
-                }
-            })
-            """
-            # Add page break after each guest (adjust index as needed)
-            requests.append({
-                'insertPageBreak': {
-                    # Adjust the index if you add more elements
-                    'location': {'index': current_index}
-                }
-            })
-            current_index += 1
 
-        # Send the batch update request
-        result = service.documents().batchUpdate(
-            documentId=new_document_id, body={'requests': requests}).execute()
-
-        # Share the document with davidkaplita@gmail.com with viewer permissions
-        # Use the Drive API for sharing
-        drive_service = build('drive', 'v3', credentials=creds)
-        permission = {
-            'type': 'user',
-            'role': 'Editor',  # Grant 'reader' (editor) permissions
-            'emailAddress': 'davidkaplita@gmail.com'
-        }
-        drive_service.permissions().create(
-            fileId=new_document_id, body=permission).execute()
-
-        # Set the page format to A6 (manual step still required)
-        print("Data written to the new Google Doc. Please manually set the page size to A6 in the document.")
-        print(
-            f"\nOpen the document here: https://docs.google.com/document/d/{new_document_id}/edit\n")
-        return new_document_id
-
-    except HttpError as err:
-        print(f"An error occurred: {err}")
-        return None
+    doc.build(story)
 
 
 if __name__ == '__main__':
+    #from_information = {
+    #    'name': 'David & Akhokem',
+    #    'address': '1214 Falconer Way',
+    #    'city_state_zip': 'Austin, Tx, 78748'
+    #}
+    from_information = None
     spreadsheet_data = get_spreadsheet_data()
     if spreadsheet_data:
-        create_google_doc(spreadsheet_data)
+        create_pdf(spreadsheet_data)
